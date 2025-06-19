@@ -9,6 +9,7 @@
     "moduleDetection": "force",
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "types": ["@clerk/nextjs"],
 
     /* Strictness */
     "strict": true,
