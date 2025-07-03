@@ -1,5 +1,9 @@
 import { postRouter } from "~/server/api/routers/post";
-import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
+import { createTRPCRouter } from "~/server/api/trpc";
+import { serverRouter } from "~/server/api/routers/server";
+import { channelRouter } from "~/server/api/routers/channel";
+import { messageRouter } from "~/server/api/routers/message";
+import { userRouter } from "~/server/api/routers/user";
 
 /**
  * This is the primary router for your server.
@@ -8,9 +12,14 @@ import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
  */
 export const appRouter = createTRPCRouter({
   post: postRouter,
+  server: serverRouter,
+  channel: channelRouter,
+  message: messageRouter,
+  user: userRouter,
 });
 
-// export type definition of API
+// Export type router type signature,
+// NOT the router itself.
 export type AppRouter = typeof appRouter;
 
 /**
@@ -20,4 +29,5 @@ export type AppRouter = typeof appRouter;
  * const res = await trpc.post.all();
  *       ^? Post[]
  */
-export const createCaller = createCallerFactory(appRouter);
+// Remove or replace this line if createCallerFactory is not available
+// export const createCaller = createCallerFactory(appRouter);

@@ -1,0 +1,203 @@
+import { useCallback, useRef, useEffect } from 'react';
+
+interface SmoothScrollOptions {
+  sensitivity?: number;
+  smoothing?: number;
+  acceleration?: number;
+  maxDelta?: number;
+  onScroll?: (delta: number, event: WheelEvent) => void;
+}
+
+interface ScrollState {
+  isScrolling: boolean;
+  velocity: number;
+  lastTime: number;
+  accumulator: number;
+}
+
+export function useSmoothScroll({
+  sensitivity = 1,
+  smoothing = 0.1,
+  acceleration = 1.2,
+  maxDelta = 100,
+  onScroll,
+}: SmoothScrollOptions = {}) {
+  const scrollStateRef = useRef<ScrollState>({
+    isScrolling: false,
+    velocity: 0,
+    lastTime: 0,
+    accumulator: 0,
+  });
+  
+  const rafRef = useRef<number>();
+  const timeoutRef = useRef<NodeJS.Timeout>();
+
+  const smoothScrollStep = useCallback(() => {
+    const state = scrollStateRef.current;
+    
+    if (Math.abs(state.velocity) < 0.1) {
+      state.isScrolling = false;
+      state.velocity = 0;
+      return;
+    }
+
+    // Apply smoothing
+    state.velocity *= (1 - smoothing);
+    
+    // Apply scroll delta to your custom logic
+    if (onScroll) {
+      onScroll(state.velocity, {} as WheelEvent);
+    }
+
+    rafRef.current = requestAnimationFrame(smoothScrollStep);
+  }, [smoothing, onScroll]);
+
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      event.preventDefault();
+      
+      const now = performance.now();
+      const deltaTime = now - scrollStateRef.current.lastTime;
+      scrollStateRef.current.lastTime = now;
+      
+      // Get the raw scroll delta
+      let delta = event.deltaY;
+      
+      // Normalize delta based on deltaMode
+      if (event.deltaMode === 1) {
+        // DOM_DELTA_LINE
+        delta *= 16;
+      } else if (event.deltaMode === 2) {
+        // DOM_DELTA_PAGE  
+        delta *= 100;
+      }
+      
+      // Apply sensitivity
+      delta *= sensitivity;
+      
+      // Clamp delta to max value
+      delta = Math.max(-maxDelta, Math.min(maxDelta, delta));
+      
+      // Apply acceleration based on scroll speed
+      if (deltaTime < 100) {
+        delta *= acceleration;
+      }
+      
+      // Update velocity
+      scrollStateRef.current.velocity += delta;
+      
+      // Start smooth scrolling if not already running
+      if (!scrollStateRef.current.isScrolling) {
+        scrollStateRef.current.isScrolling = true;
+        smoothScrollStep();
+      }
+      
+      // Call immediate scroll callback
+      if (onScroll) {
+        onScroll(delta, event);
+      }
+      
+      // Clear the timeout and set a new one
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      
+      timeoutRef.current = setTimeout(() => {
+        scrollStateRef.current.isScrolling = false;
+        scrollStateRef.current.velocity = 0;
+        if (rafRef.current) {
+          cancelAnimationFrame(rafRef.current);
+        }
+      }, 150);
+    },
+    [sensitivity, acceleration, maxDelta, smoothScrollStep, onScroll]
+  );
+
+  const enableSmoothScroll = useCallback(
+    (element: HTMLElement | Window = window) => {
+      const target = element === window ? window : element;
+      target.addEventListener('wheel', handleWheel, { passive: false });
+      
+      return () => {
+        target.removeEventListener('wheel', handleWheel);
+        if (rafRef.current) {
+          cancelAnimationFrame(rafRef.current);
+        }
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+      };
+    },
+    [handleWheel]
+  );
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return {
+    enableSmoothScroll,
+    isScrolling: scrollStateRef.current.isScrolling,
+    velocity: scrollStateRef.current.velocity,
+  };
+}
+
+// Enhanced scroll hook with more control
+export function useAdvancedScroll() {
+  const accumulatorRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const velocityRef = useRef(0);
+  
+  const handleAdvancedScroll = useCallback(
+    (callback: (direction: 'up' | 'down', intensity: number, velocity: number) => void) => {
+      return (event: WheelEvent) => {
+        event.preventDefault();
+        
+        const now = performance.now();
+        const deltaTime = now - lastTimeRef.current;
+        lastTimeRef.current = now;
+        
+        // Get normalized delta
+        let delta = event.deltaY;
+        if (event.deltaMode === 1) delta *= 16;
+        if (event.deltaMode === 2) delta *= 100;
+        
+        // Calculate velocity (pixels per millisecond)
+        const velocity = deltaTime > 0 ? Math.abs(delta) / deltaTime : 0;
+        velocityRef.current = velocity;
+        
+        // Accumulate small deltas
+        accumulatorRef.current += delta;
+        
+        // Define threshold for triggering action
+        const threshold = 50;
+        
+        if (Math.abs(accumulatorRef.current) >= threshold) {
+          const direction = accumulatorRef.current > 0 ? 'down' : 'up';
+          const intensity = Math.min(Math.abs(accumulatorRef.current) / threshold, 3);
+          
+          callback(direction, intensity, velocity);
+          
+          // Reset accumulator
+          accumulatorRef.current = 0;
+        }
+        
+        // Auto-clear accumulator after delay
+        setTimeout(() => {
+          accumulatorRef.current *= 0.8;
+        }, 100);
+      };
+    },
+    []
+  );
+  
+  return { handleAdvancedScroll, velocity: velocityRef.current };
+}

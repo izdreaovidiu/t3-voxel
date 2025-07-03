@@ -1,6 +1,8 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { Inter } from "next/font/google";
 import { TRPCReactProvider } from "~/trpc/react";
+import { Toaster } from "sonner";
+import { EnhancedSocketProvider } from "~/contexts/EnhancedSocketContext";
 
 import "~/styles/globals.css";
 
@@ -24,7 +26,12 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className={`font-sans ${inter.variable}`}>
-          <TRPCReactProvider>{children}</TRPCReactProvider>
+          <TRPCReactProvider>
+            <EnhancedSocketProvider>
+              {children}
+            </EnhancedSocketProvider>
+            <Toaster position="top-right" richColors />
+          </TRPCReactProvider>
         </body>
       </html>
     </ClerkProvider>

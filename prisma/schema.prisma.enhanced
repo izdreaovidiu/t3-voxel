@@ -1,0 +1,73 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+    
+model ServerInvite {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  serverId  String
+  createdBy String
+  maxUses   Int?     // null = unlimited
+  uses      Int      @default(0)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  // Relations
+  server    Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  creator   User   @relation("InviteCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@map("server_invites")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  username  String
+  email     String   @unique
+  avatar    String?
+  status    UserStatus @default(OFFLINE)
+  activity  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  ownedServers       Server[]                  @relation("ServerOwner")
+  serverMembers      ServerMember[]
+  messages           Message[]
+  reactions          MessageReaction[]
+  voiceStates        VoiceState[]
+  createdInvites     ServerInvite[]            @relation("InviteCreator")
+  voiceSessions      VoiceSession[]
+  voicePreferences   UserVoicePreferences?
+  voicePermissions   VoiceChannelPermission[]  @relation("UserVoicePermissions")
+  voiceConnectionLogs VoiceConnectionLog[]
+
+  @@map("users")
+}
+
+model Server {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  icon        String?
+  color       String   @default("from-[#5865F2] to-[#4752C4]")
+  glowColor   String   @default("#5865F2")
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  owner                 User                     @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members               ServerMember[]
+  channels              Channel[]
+  

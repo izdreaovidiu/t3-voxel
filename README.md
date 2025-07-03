@@ -1,29 +1,43 @@
-# Create T3 App
+# Voxel - Voice Chat Application
 
-This is a [T3 Stack](https://create.t3.gg/) project bootstrapped with `create-t3-app`.
+A Discord-like voice chat application built with Next.js, tRPC, Prisma, Socket.IO, and WebRTC.
 
-## What's next? How do I make an app with this?
+## Features
+- Real-time voice and video calls
+- Screen sharing capabilities  
+- Text messaging
+- Server and channel management
+- User presence system
+- Invite system
 
-We try to keep this project as simple as possible, so you can start with just the scaffolding we set up for you, and add additional things later when they become necessary.
+## Getting Started
 
-If you are not familiar with the different technologies used in this project, please refer to the respective docs. If you still are in the wind, please join our [Discord](https://t3.gg/discord) and ask for help.
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-- [Next.js](https://nextjs.org)
-- [NextAuth.js](https://next-auth.js.org)
-- [Prisma](https://prisma.io)
-- [Drizzle](https://orm.drizzle.team)
-- [Tailwind CSS](https://tailwindcss.com)
-- [tRPC](https://trpc.io)
+2. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   ```
 
-## Learn More
+3. Set up the database:
+   ```bash
+   npx prisma db push
+   npx prisma generate
+   ```
 
-To learn more about the [T3 Stack](https://create.t3.gg/), take a look at the following resources:
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-- [Documentation](https://create.t3.gg/)
-- [Learn the T3 Stack](https://create.t3.gg/en/faq#what-learning-resources-are-currently-available) — Check out these awesome tutorials
-
-You can check out the [create-t3-app GitHub repository](https://github.com/t3-oss/create-t3-app) — your feedback and contributions are welcome!
-
-## How do I deploy this?
-
-Follow our deployment guides for [Vercel](https://create.t3.gg/en/deployment/vercel), [Netlify](https://create.t3.gg/en/deployment/netlify) and [Docker](https://create.t3.gg/en/deployment/docker) for more information.
+## Technologies Used
+- Next.js 14
+- tRPC for type-safe APIs
+- Prisma ORM  
+- Socket.IO for real-time communication
+- WebRTC for voice/video calls
+- Clerk for authentication
+- Tailwind CSS for styling

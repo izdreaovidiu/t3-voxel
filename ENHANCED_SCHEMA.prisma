@@ -1,0 +1,414 @@
+// This is your enhanced Prisma schema file with voice channel features
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+    
+model ServerInvite {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  serverId  String
+  createdBy String
+  maxUses   Int?     // null = unlimited
+  uses      Int      @default(0)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  // Relations
+  server    Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  creator   User   @relation("InviteCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@map("server_invites")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  username  String
+  email     String   @unique
+  avatar    String?
+  status    UserStatus @default(OFFLINE)
+  activity  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  ownedServers       Server[]                  @relation("ServerOwner")
+  serverMembers      ServerMember[]
+  messages           Message[]
+  reactions          MessageReaction[]
+  voiceStates        VoiceState[]
+  createdInvites     ServerInvite[]            @relation("InviteCreator")
+  voiceSessions      VoiceSession[]
+  voicePreferences   UserVoicePreferences?
+  voicePermissions   VoiceChannelPermission[]  @relation("UserVoicePermissions")
+  voiceConnectionLogs VoiceConnectionLog[]
+
+  @@map("users")
+}
+
+model Server {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  icon        String?
+  color       String   @default("from-[#5865F2] to-[#4752C4]")
+  glowColor   String   @default("#5865F2")
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  owner                 User                     @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members               ServerMember[]
+  channels              Channel[]
+  roles                 Role[]
+  invites               ServerInvite[]
+  voiceChannelSettings  VoiceChannelSettings[]
+  voiceChannelStats     VoiceChannelStats[]
+  voiceSessions         VoiceSession[]
+
+  @@map("servers")
+}
+
+model ServerMember {
+  id       String   @id @default(cuid())
+  userId   String
+  serverId String
+  nickname String?
+  joinedAt DateTime @default(now())
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  roles  MemberRole[]
+
+  @@unique([userId, serverId])
+  @@map("server_members")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String
+  color       String?
+  permissions String[] // JSON array of permission strings
+  serverId    String
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  server               Server                   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  memberRoles          MemberRole[]
+  voicePermissions     VoiceChannelPermission[] @relation("RoleVoicePermissions")
+
+  @@map("roles")
+}
+
+model MemberRole {
+  id       String @id @default(cuid())
+  memberId String
+  roleId   String
+
+  // Relations
+  member ServerMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role   Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, roleId])
+  @@map("member_roles")
+}
+
+model Channel {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  type        ChannelType @default(TEXT)
+  serverId    String
+  categoryId  String?
+  position    Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  server                 Server                   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  category               Category?                @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  messages               Message[]
+  voiceStates            VoiceState[]
+  voiceChannelSettings   VoiceChannelSettings?
+  voiceChannelStats      VoiceChannelStats[]
+  voiceSessions          VoiceSession[]
+  voicePermissions       VoiceChannelPermission[]
+  voiceConnectionLogs    VoiceConnectionLog[]
+
+  @@map("channels")
+}
+
+model Category {
+  id       String   @id @default(cuid())
+  name     String
+  serverId String
+  position Int      @default(0)
+  createdAt DateTime @default(now())
+
+  // Relations
+  channels Channel[]
+
+  @@map("categories")
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  authorId  String
+  channelId String
+  edited    Boolean  @default(false)
+  editedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  author    User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel   Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  reactions MessageReaction[]
+
+  @@map("messages")
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  emoji     String
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  // Relations
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+model VoiceState {
+  id        String   @id @default(cuid())
+  userId    String
+  channelId String
+  muted     Boolean  @default(false)
+  deafened  Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+  @@map("voice_states")
+}
+
+// Enhanced Voice Channel Models
+
+model VoiceChannelSettings {
+  id                String   @id @default(cuid())
+  channelId         String   @unique
+  serverId          String
+  maxParticipants   Int      @default(20)
+  allowVideo        Boolean  @default(true)
+  allowScreenShare  Boolean  @default(true)
+  isLocked          Boolean  @default(false)
+  requirePermission Boolean  @default(false)
+  bitrateLimit      Int?     // kbps
+  region            String?  // voice region preference
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  server  Server  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@map("voice_channel_settings")
+}
+
+model VoiceChannelStats {
+  id                   String   @id @default(cuid())
+  channelId            String
+  serverId             String
+  date                 DateTime @db.Date
+  totalSessions        Int      @default(0)
+  totalDuration        Int      @default(0) // seconds
+  peakParticipants     Int      @default(0)
+  avgParticipants      Float    @default(0)
+  totalParticipants    Int      @default(0)
+  videoSessions        Int      @default(0)
+  screenShareSessions  Int      @default(0)
+  avgConnectionQuality Float?   // 0-100
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  server  Server  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, date])
+  @@map("voice_channel_stats")
+}
+
+model VoiceSession {
+  id                 String            @id @default(cuid())
+  userId             String
+  channelId          String
+  serverId           String
+  joinedAt           DateTime          @default(now())
+  leftAt             DateTime?
+  duration           Int?              // seconds
+  wasVideoEnabled    Boolean           @default(false)
+  wasScreenSharing   Boolean           @default(false)
+  speakingTime       Int               @default(0) // seconds
+  connectionQuality  ConnectionQuality?
+  avgLatency         Int?              // ms
+  packetsLost        Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  // Relations
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel            Channel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  server             Server              @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  connectionLogs     VoiceConnectionLog[]
+
+  @@map("voice_sessions")
+}
+
+model UserVoicePreferences {
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  selectedMicrophone       String?
+  selectedSpeaker          String?
+  selectedCamera           String?
+  microphoneVolume         Int      @default(100)
+  speakerVolume            Int      @default(100)
+  audioQuality             AudioQuality @default(AUTO)
+  videoQuality             VideoQuality @default(AUTO)
+  echoCancellation         Boolean  @default(true)
+  noiseSuppression         Boolean  @default(true)
+  autoGainControl          Boolean  @default(true)
+  speakingThreshold        Int      @default(50)
+  silenceTimeout           Int      @default(1000)
+  enableSpeakingDetection  Boolean  @default(true)
+  enableConnectionMonitoring Boolean @default(true)
+  showConnectionQuality    Boolean  @default(true)
+  showSpeakingIndicators   Boolean  @default(true)
+  enableNotifications      Boolean  @default(true)
+  enableHoverTooltips      Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_voice_preferences")
+}
+
+model VoiceChannelPermission {
+  id         String              @id @default(cuid())
+  channelId  String
+  userId     String?
+  roleId     String?
+  permission VoicePermissionType
+  allowed    Boolean             @default(true)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  // Relations
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User?   @relation("UserVoicePermissions", fields: [userId], references: [id], onDelete: Cascade)
+  role    Role?   @relation("RoleVoicePermissions", fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId, permission])
+  @@unique([channelId, roleId, permission])
+  @@map("voice_channel_permissions")
+}
+
+model VoiceConnectionLog {
+  id        String                 @id @default(cuid())
+  sessionId String
+  userId    String
+  channelId String
+  eventType VoiceConnectionEvent
+  eventData String?               // JSON data
+  timestamp DateTime               @default(now())
+  userAgent String?
+  ipAddress String?
+
+  // Relations
+  session VoiceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@map("voice_connection_logs")
+}
+
+// Enums
+enum UserStatus {
+  ONLINE
+  IDLE
+  DND
+  OFFLINE
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+  VIDEO
+  ANNOUNCEMENT
+}
+
+enum ConnectionQuality {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum AudioQuality {
+  LOW
+  MEDIUM
+  HIGH
+  AUTO
+}
+
+enum VideoQuality {
+  LOW
+  MEDIUM
+  HIGH
+  AUTO
+}
+
+enum VoicePermissionType {
+  JOIN
+  SPEAK
+  VIDEO
+  SCREEN_SHARE
+  MUTE_OTHERS
+  MANAGE
+}
+
+enum VoiceConnectionEvent {
+  JOIN
+  LEAVE
+  MUTE
+  UNMUTE
+  VIDEO_ON
+  VIDEO_OFF
+  SCREEN_SHARE_START
+  SCREEN_SHARE_STOP
+  SPEAKING_START
+  SPEAKING_STOP
+  CONNECTION_QUALITY_CHANGE
+}

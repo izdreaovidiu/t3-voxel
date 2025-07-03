@@ -1,0 +1,228 @@
+// src/hooks/usePresence.ts
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
+
+export interface UserPresence {
+  userId: string;
+  status: 'online' | 'offline' | 'away' | 'dnd' | 'invisible';
+  activity?: {
+    type: string;
+    name: string;
+    details?: string;
+    url?: string;
+    timestamp: number;
+    largeImageKey?: string;
+    smallImageKey?: string;
+  } | null;
+  lastSeen: Date;
+  fullName?: string;
+  displayName?: string;
+}
+
+export interface PresenceContextType {
+  socket: Socket | null;
+  isConnected: boolean;
+  currentUser: UserPresence | null;
+  friends: UserPresence[];
+  updateStatus: (status: UserPresence['status']) => void;
+  updateActivity: (activity: UserPresence['activity']) => void;
+  clearActivity: () => void;
+  sendHeartbeat: () => void;
+}
+
+export const usePresence = (userId: string | null, token?: string): PresenceContextType => {
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentUser, setCurrentUser] = useState<UserPresence | null>(null);
+  const [friends, setFriends] = useState<UserPresence[]>([]);
+  const heartbeatInterval = useRef<NodeJS.Timeout | null>(null);
+  const activityTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Initialize socket connection
+  useEffect(() => {
+    if (!userId) return;
+
+    // Prevent multiple connections
+    if (socket) {
+      socket.disconnect();
+    }
+
+    // Initialize Socket.IO server first
+    fetch('/api/socket/io', { method: 'POST' })
+      .then(() => {
+        console.log('Socket.IO server initialized');
+        
+        // Connect to Socket.IO with better configuration
+        const newSocket = io({
+          path: '/api/socket/io',
+          addTrailingSlash: false,
+          forceNew: true,
+          autoConnect: true,
+          timeout: 20000,
+          transports: ['websocket', 'polling']
+        });
+
+        setSocket(newSocket);
+
+        // Connection events
+        newSocket.on('connect', () => {
+          console.log('Connected to presence server');
+          setIsConnected(true);
+          
+          // Authenticate user
+          newSocket.emit('authenticate', { userId, token });
+        });
+
+        newSocket.on('disconnect', () => {
+          console.log('Disconnected from presence server');
+          setIsConnected(false);
+        });
+
+        // Authentication response
+        newSocket.on('authenticated', (data: { success: boolean }) => {
+          if (data.success) {
+            console.log('Successfully authenticated');
+            
+            // Set current user as online with proper display name
+            setCurrentUser({
+              userId,
+              status: 'online',
+              activity: null,
+              lastSeen: new Date(),
+              fullName: 'Izdrea Ovidiu',
+              displayName: 'Izdrea Ovidiu'
+            });
+            
+            startHeartbeat();
+            setupActivityDetection();
+          }
+        });
+
+        newSocket.on('auth_error', (data: { error: string }) => {
+          console.error('Authentication error:', data.error);
+        });
+
+        // Friends presence updates
+        newSocket.on('friends_presence', (friendsData: UserPresence[]) => {
+          setFriends(friendsData);
+        });
+
+        newSocket.on('friend_presence_update', (friendPresence: UserPresence) => {
+          setFriends(prev => {
+            const updated = prev.filter(f => f.userId !== friendPresence.userId);
+            return [...updated, friendPresence];
+          });
+        });
+
+        // Cleanup on unmount
+        return () => {
+          if (heartbeatInterval.current) {
+            clearInterval(heartbeatInterval.current);
+          }
+          if (activityTimeout.current) {
+            clearTimeout(activityTimeout.current);
+          }
+          newSocket.disconnect();
+        };
+      })
+      .catch(error => {
+        console.error('Failed to initialize Socket.IO server:', error);
+      });
+  }, [userId, token]);
+
+  // Start heartbeat to keep connection alive and detect activity
+  const startHeartbeat = useCallback(() => {
+    if (heartbeatInterval.current) {
+      clearInterval(heartbeatInterval.current);
+    }
+
+    heartbeatInterval.current = setInterval(() => {
+      if (socket?.connected && currentUser) {
+        // Update last seen time
+        const updatedUser = { ...currentUser, lastSeen: new Date() };
+        setCurrentUser(updatedUser);
+      }
+    }, 30000); // Every 30 seconds
+  }, [socket, currentUser]);
+
+  // Setup activity detection for inactivity
+  const setupActivityDetection = useCallback(() => {
+    let lastActivity = Date.now();
+
+    const resetActivityTimer = () => {
+      lastActivity = Date.now();
+      
+      if (activityTimeout.current) {
+        clearTimeout(activityTimeout.current);
+      }
+
+      activityTimeout.current = setTimeout(() => {
+        // Mark as away after 5 minutes of inactivity
+        // updateStatus('away'); // Commented out to keep user online
+      }, 5 * 60 * 1000);
+    };
+
+    // Listen for user activity
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    
+    activityEvents.forEach(event => {
+      document.addEventListener(event, resetActivityTimer, { passive: true });
+    });
+
+    // Initial timer
+    resetActivityTimer();
+
+    // Cleanup function
+    return () => {
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, resetActivityTimer);
+      });
+      if (activityTimeout.current) {
+        clearTimeout(activityTimeout.current);
+      }
+    };
+  }, []);
+
+  // Update user status
+  const updateStatus = useCallback((status: UserPresence['status']) => {
+    if (socket?.connected) {
+      socket.emit('update_status', { status });
+      setCurrentUser(prev => prev ? { ...prev, status } : null);
+    }
+  }, [socket]);
+
+  // Update user activity
+  const updateActivity = useCallback((activity: UserPresence['activity']) => {
+    if (socket?.connected) {
+      socket.emit('update_activity', { activity });
+      setCurrentUser(prev => prev ? { ...prev, activity } : null);
+    }
+  }, [socket]);
+
+  // Clear user activity
+  const clearActivity = useCallback(() => {
+    if (socket?.connected) {
+      socket.emit('clear_activity');
+      setCurrentUser(prev => prev ? { ...prev, activity: null } : null);
+    }
+  }, [socket]);
+
+  // Send heartbeat manually
+  const sendHeartbeat = useCallback(() => {
+    if (socket?.connected && currentUser) {
+      const updatedUser = { ...currentUser, lastSeen: new Date() };
+      setCurrentUser(updatedUser);
+    }
+  }, [socket, currentUser]);
+
+  return {
+    socket,
+    isConnected,
+    currentUser,
+    friends,
+    updateStatus,
+    updateActivity,
+    clearActivity,
+    sendHeartbeat
+  };
+};

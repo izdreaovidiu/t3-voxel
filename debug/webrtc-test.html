@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Debug Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0D1117;
+            color: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section {
+            background: #161B22;
+            border: 1px solid #30363D;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .button {
+            background: #57F287;
+            color: black;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .button:hover {
+            background: #3BA55C;
+        }
+        .button.danger {
+            background: #ED4245;
+            color: white;
+        }
+        .button.danger:hover {
+            background: #C23237;
+        }
+        .log {
+            background: #0D1117;
+            border: 1px solid #30363D;
+            border-radius: 4px;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 0;
+            border-bottom: 1px solid #21262D;
+        }
+        .log-error {
+            color: #ED4245;
+        }
+        .log-success {
+            color: #57F287;
+        }
+        .log-info {
+            color: #58A6FF;
+        }
+        .status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status.connected {
+            background: #57F287;
+            box-shadow: 0 0 6px rgba(87, 242, 135, 0.5);
+        }
+        .status.disconnected {
+            background: #ED4245;
+            box-shadow: 0 0 6px rgba(237, 66, 69, 0.5);
+        }
+        .status.connecting {
+            background: #FEE75C;
+            box-shadow: 0 0 6px rgba(254, 231, 92, 0.5);
+        }
+        audio {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ WebRTC Voice Chat Debug Tool</h1>
+        
+        <div class="section">
+            <h2>Connection Status</h2>
+            <p>
+                Socket: <span class="status disconnected" id="socket-status"></span>
+                <span id="socket-status-text">Disconnected</span>
+            </p>
+            <p>
+                Audio: <span class="status disconnected" id="audio-status"></span>
+                <span id="audio-status-text">Not Available</span>
+            </p>
+        </div>
+
+        <div class="section">
+            <h2>Controls</h2>
+            <input type="text" id="user-id" placeholder="Enter User ID" style="padding: 8px; margin-right: 10px; background: #21262D; border: 1px solid #30363D; color: white; border-radius: 4px;">
+            <input type="text" id="channel-id" placeholder="Enter Channel ID" style="padding: 8px; margin-right: 10px; background: #21262D; border: 1px solid #30363D; color: white; border-radius: 4px;">
+            <br><br>
+            <button class="button" onclick="connectSocket()">Connect Socket</button>
+            <button class="button" onclick="requestAudio()">Request Audio</button>
+            <button class="button" onclick="joinCall()">Join Voice Call</button>
+            <button class="button danger" onclick="leaveCall()">Leave Call</button>
+            <button class="button" onclick="clearLogs()">Clear Logs</button>
+        </div>
+
+        <div class="section">
+            <h2>Active Peers</h2>
+            <div id="peers-list">No active peers</div>
+        </div>
+
+        <div class="section">
+            <h2>Debug Logs</h2>
+            <div class="log" id="debug-log"></div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Global variables
+        let socket = null;
+        let localStream = null;
+        let peerConnections = new Map();
+        let isCallActive = false;
+        let userId = '';
+        let channelId = '';
+
+        // ICE servers configuration
+        const ICE_SERVERS = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' }
+        ];
+
+        // Logging functions
+        function log(message, type = 'info') {
+            const logContainer = document.getElementById('debug-log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(`[WebRTC Debug] ${message}`);
+        }
+
+        function clearLogs() {
+            document.getElementById('debug-log').innerHTML = '';
+        }
+
+        // Status update functions
+        function updateSocketStatus(connected) {
+            const statusElement = document.getElementById('socket-status');
+            const textElement = document.getElementById('socket-status-text');
+            
+            if (connected) {
+                statusElement.className = 'status connected';
+                textElement.textContent = 'Connected';
+            } else {
+                statusElement.className = 'status disconnected';
+                textElement.textContent = 'Disconnected';
+            }
+        }
+
+        function updateAudioStatus(available) {
+            const statusElement = document.getElementById('audio-status');
+            const textElement = document.getElementById('audio-status-text');
+            
+            if (available) {
+                statusElement.className = 'status connected';
+                textElement.textContent = 'Available';
+            } else {
+                statusElement.className = 'status disconnected';
+                textElement.textContent = 'Not Available';
+            }
+        }
+
+        function updatePeersList() {
+            const peersContainer = document.getElementById('peers-list');
+            if (peerConnections.size === 0) {
+                peersContainer.textContent = 'No active peers';
+            } else {
+                peersContainer.innerHTML = '';
+                peerConnections.forEach((pc, peerId) => {
+                    const peerDiv = document.createElement('div');
+                    peerDiv.style.margin = '5px 0';
+                    peerDiv.innerHTML = `
+                        <strong>${peerId}</strong> - 
+                        Connection: ${pc.connectionState}, 
+                        ICE: ${pc.iceConnectionState}
+                    `;
+                    peersContainer.appendChild(peerDiv);
+                });
+            }
+        }
+
+        // Socket connection
+        function connectSocket() {
+            userId = document.getElementById('user-id').value || `user_${Math.random().toString(36).substr(2, 9)}`;
+            channelId = document.getElementById('channel-id').value || 'test-channel';
+            
+            log(`Connecting socket for user: ${userId}`);
+            
+            socket = io('http://localhost:3001');
+            
+            socket.on('connect', () => {
+                log('Socket connected', 'success');
+                updateSocketStatus(true);
+                
+                // Join as user
+                socket.emit('user:join', { userId });
+            });
+            
+            socket.on('disconnect', () => {
+                log('Socket disconnected', 'error');
+                updateSocketStatus(false);
+            });
+            
+            // WebRTC events
+            socket.on('webrtc:user-joined', async (data) => {
+                log(`User joined: ${data.userId} (${data.username})`, 'info');
+                await createPeerConnection(data.userId, data.username);
+            });
+            
+            socket.on('webrtc:user-left', (data) => {
+                log(`User left: ${data.userId}`, 'info');
+                removePeerConnection(data.userId);
+            });
+            
+            socket.on('webrtc:offer', async (data) => {
+                log(`Received offer from: ${data.from}`, 'info');
+                await handleOffer(data);
+            });
+            
+            socket.on('webrtc:answer', async (data) => {
+                log(`Received answer from: ${data.from}`, 'info');
+                await handleAnswer(data);
+            });
+            
+            socket.on('webrtc:ice-candidate', async (data) => {
+                log(`Received ICE candidate from: ${data.from}`, 'info');
+                await handleIceCandidate(data);
+            });
+        }
+
+        // Audio handling
+        async function requestAudio() {
+            try {
+                log('Requesting audio access...');
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 48000
+                    }
+                });
+                
+                log(`Audio access granted - tracks: ${localStream.getTracks().length}`, 'success');
+                updateAudioStatus(true);
+                
+                // Log track details
+                localStream.getTracks().forEach(track => {
+                    log(`Track: ${track.kind} - ${track.label} - enabled: ${track.enabled}`);
+                });
+                
+            } catch (error) {
+                log(`Failed to get audio: ${error.message}`, 'error');
+                updateAudioStatus(false);
+            }
+        }
+
+        // Call management
+        function joinCall() {
+            if (!socket) {
+                log('Socket not connected', 'error');
+                return;
+            }
+            
+            if (!localStream) {
+                log('Audio not available', 'error');
+                return;
+            }
+            
+            log(`Joining voice call in channel: ${channelId}`);
+            isCallActive = true;
+            
+            socket.emit('webrtc:join-call', {
+                type: 'voice',
+                channelId: channelId,
+                username: userId
+            });
+        }
+
+        function leaveCall() {
+            if (!socket) return;
+            
+            log('Leaving voice call');
+            isCallActive = false;
+            
+            // Close all peer connections
+            peerConnections.forEach((pc, peerId) => {
+                pc.close();
+            });
+            peerConnections.clear();
+            updatePeersList();
+            
+            socket.emit('webrtc:leave-call', { channelId });
+        }
+
+        // WebRTC peer connection management
+        async function createPeerConnection(peerId, username) {
+            if (peerConnections.has(peerId)) {
+                log(`Peer connection already exists for: ${peerId}`);
+                return;
+            }
+            
+            log(`Creating peer connection for: ${peerId}`);
+            
+            const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+            peerConnections.set(peerId, pc);
+            
+            // Add local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                    log(`Added ${track.kind} track for peer: ${peerId}`);
+                });
+            }
+            
+            // Handle remote stream
+            pc.ontrack = (event) => {
+                log(`Received remote stream from: ${peerId}`, 'success');
+                const remoteStream = event.streams[0];
+                playRemoteAudio(peerId, remoteStream);
+            };
+            
+            // Handle ICE candidates
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('webrtc:ice-candidate', {
+                        candidate: event.candidate,
+                        to: peerId
+                    });
+                }
+            };
+            
+            // Handle connection state changes
+            pc.onconnectionstatechange = () => {
+                log(`Connection state with ${peerId}: ${pc.connectionState}`);
+                updatePeersList();
+                
+                if (pc.connectionState === 'connected') {
+                    log(`Successfully connected to: ${peerId}`, 'success');
+                } else if (pc.connectionState === 'failed') {
+                    log(`Connection failed with: ${peerId}`, 'error');
+                }
+            };
+            
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE connection state with ${peerId}: ${pc.iceConnectionState}`);
+            };
+            
+            updatePeersList();
+            
+            // Create and send offer
+            try {
+                const offer = await pc.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: false
+                });
+                await pc.setLocalDescription(offer);
+                
+                socket.emit('webrtc:offer', {
+                    offer: offer,
+                    to: peerId
+                });
+                
+                log(`Sent offer to: ${peerId}`);
+            } catch (error) {
+                log(`Failed to create offer for ${peerId}: ${error.message}`, 'error');
+            }
+        }
+
+        function removePeerConnection(peerId) {
+            const pc = peerConnections.get(peerId);
+            if (pc) {
+                pc.close();
+                peerConnections.delete(peerId);
+                updatePeersList();
+                
+                // Remove audio element
+                const audioElement = document.getElementById(`audio-${peerId}`);
+                if (audioElement) {
+                    audioElement.remove();
+                }
+                
+                log(`Removed peer connection: ${peerId}`);
+            }
+        }
+
+        async function handleOffer(data) {
+            const { offer, from, username } = data;
+            
+            if (!peerConnections.has(from)) {
+                await createPeerConnection(from, username);
+            }
+            
+            const pc = peerConnections.get(from);
+            if (!pc) return;
+            
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                
+                socket.emit('webrtc:answer', {
+                    answer: answer,
+                    to: from
+                });
+                
+                log(`Sent answer to: ${from}`);
+            } catch (error) {
+                log(`Failed to handle offer from ${from}: ${error.message}`, 'error');
+            }
+        }
+
+        async function handleAnswer(data) {
+            const { answer, from } = data;
+            const pc = peerConnections.get(from);
+            
+            if (!pc) {
+                log(`No peer connection found for answer from: ${from}`, 'error');
+                return;
+            }
+            
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                log(`Set remote description (answer) for: ${from}`);
+            } catch (error) {
+                log(`Failed to handle answer from ${from}: ${error.message}`, 'error');
+            }
+        }
+
+        async function handleIceCandidate(data) {
+            const { candidate, from } = data;
+            const pc = peerConnections.get(from);
+            
+            if (!pc) {
+                log(`No peer connection found for ICE candidate from: ${from}`, 'error');
+                return;
+            }
+            
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                log(`Added ICE candidate from: ${from}`);
+            } catch (error) {
+                log(`Failed to add ICE candidate from ${from}: ${error.message}`, 'error');
+            }
+        }
+
+        function playRemoteAudio(peerId, stream) {
+            let audioElement = document.getElementById(`audio-${peerId}`);
+            
+            if (!audioElement) {
+                audioElement = document.createElement('audio');
+                audioElement.id = `audio-${peerId}`;
+                audioElement.autoplay = true;
+                audioElement.playsInline = true;
+                document.body.appendChild(audioElement);
+            }
+            
+            audioElement.srcObject = stream;
+            audioElement.play().catch(error => {
+                log(`Error playing audio for ${peerId}: ${error.message}`, 'error');
+            });
+        }
+
+        // Initialize
+        log('WebRTC Debug Tool loaded', 'success');
+        log('Enter User ID and Channel ID, then click Connect Socket to start');
+    </script>
+</body>
+</html>
